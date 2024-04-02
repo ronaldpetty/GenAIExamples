@@ -1,9 +1,8 @@
-from sklearn.linear_model import LogisticRegression
 import pandas as pd
 import numpy as np
-from utils import load_data_for_st_encoders, make_batches, get_args
+from business_safety_classifier import BusinessSafetyClassifier
+from utils import get_args, load_data_for_st_encoders, make_batches
 from sentence_transformers import SentenceTransformer
-
 
 
 def prepare_data(args):
@@ -12,10 +11,7 @@ def prepare_data(args):
     model = SentenceTransformer(model_name_or_path=args.model, trust_remote_code=True)
     n = 0
     for batch in make_batches(text, args.batch_size):
-        # batch = add_prefix(batch, args.prefix)
-        print(batch)
-        embeddings = model.encode(batch, convert_to_tensor=True)
-        
+        embeddings = model.encode(batch, convert_to_tensor=True)    
         embeddings = embeddings.cpu().detach().numpy()
 
         print('Shape of emb of this batch: ', embeddings.shape)
@@ -33,27 +29,12 @@ def prepare_data(args):
     
 
 
-
-def train_lr_classifier(args, data, labels):
-    
-    clf = LogisticRegression(random_state=args.random_seed,
-                             max_iter=args.max_iter)
-    clf.fit(data, labels)
-    # accuracy on training set
-    acc = clf.score(data, labels)
-    print('Accuracy: {:.3f}'.format(acc))
-    return clf
-
-def save_classifier(clf, args):
-    from joblib import dump
-    dump(clf, args.output)
-    print('Saved classifier at :', args.output)
-
 def main():
     args = get_args()
     data, labels = prepare_data(args)
-    clf = train_lr_classifier(args, data, labels)
-    save_classifier(clf, args)
+    biz_safety_clf = BusinessSafetyClassifier(args)
+    biz_safety_clf.train(args, data, labels)
+    biz_safety_clf.save_clf(args.lr_clf)
 
 if __name__=="__main__":
     main()

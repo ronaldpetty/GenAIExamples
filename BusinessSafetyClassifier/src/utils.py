@@ -35,7 +35,7 @@ def get_args():
     )
 
     parser.add_argument(
-        "--max_seq_len", type=int, default=512, help="file directory where input and output are stored"
+        "--max_seq_len", type=int, default=512, help="max sequence length"
     )
 
     parser.add_argument(
@@ -131,7 +131,6 @@ def add_prefix(text_batch, prefix):
 
 def load_data_for_st_encoders(args):
     df = pd.read_csv(args.filedir+args.filename)
-    # df = df.sample(32)
     text = df['text'].to_list()
     text = add_prefix(text, args.prefix)
     labels = df['label'].to_list()
