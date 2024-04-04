@@ -110,6 +110,12 @@ def main():
     df.to_csv(args.filedir+args.output+'.csv')
     print('finished saving results!')
 
+    # train test split for training and evaluation of classifier
+    df_eval = df.sample(args.eval_size, random_state=args.random_seed)
+    df_train = df.drop(df_eval.index)
+    df_eval.to_csv(args.filedir+args.output+'_eval.csv')
+    df_train.to_csv(args.filedir+args.output+'_train.csv')
+
     # run evals on LLM annotations 
     # to compare with human annotations if available
     if args.run_eval == True:

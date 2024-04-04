@@ -23,9 +23,9 @@ def main():
                       'Jack likes to eat apples',
                        'revenue growed 20%']
 
-    # for txt in testing_string:
-    #     print('Text to be classified: ', txt)
-    #     print('Predicted label: ', biz_safety_clf.predict(args, txt))
+    for txt in testing_string:
+        print('Text to be classified: ', txt)
+        print('Predicted label: ', biz_safety_clf.predict(args, txt))
 
 
 

@@ -2,6 +2,7 @@ from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import pipeline
 import torch
+import json
 
 
 def format_prompt(text, tokenizer, prompt_template):

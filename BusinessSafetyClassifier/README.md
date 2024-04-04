@@ -60,7 +60,7 @@ We will need to get the Patronus EnterprisePII dataset from the llm-foundry repo
 
 2. Preprocess the dataset
 The preprocessing step is specific to the Patronus EnterprisePII dataset where we get the actual text components and the gold labels from the original jsonl file. </br>
-Specify the `FILEDIR`, `FILENAME` and `OUTPUT` variables in the `run_process_enterprisepii_dataset.sh` script and then run the command below. After the script is successfully completed, you will get three csv files: 1) the whole dataset, 2) randomly sampled training set, 3) test set that is exclusive of the training set.
+Specify the `FILEDIR`, `FILENAME` and `OUTPUT` variables in the `run_process_enterprisepii_dataset.sh` script and then run the command below.
 
     ```shell
     bash run_process_enterprisepii_dataset.sh
@@ -72,11 +72,47 @@ Note: Currently we use vllm's offline batch mode to run text generation on NV GP
     ```shell
     bash run_annotation.sh
     ```
-After the script is successfully completed, you will get a csv file with LLM's predicted labels in it. For the Patronus EnterprisePII dataset, we also enabled calculation of annotation accuracy. You should see metrics printed out that are similar to the ones listed below. Since there is randomness in LLM generation, you may not see exactly the same numbers. Randomness is introduced as to allow for re-generation of annotations if the annotation failed in the first round.
+After the script is successfully completed, you will get three csv files with LLM annotations: 1) the whole dataset, 2) randomly sampled training set, 3) test set that is exclusive of the training set. Note: by default, the test set size is 300. If you want to change the test set size, you can change the `TESTSIZE` variable in the `run_annotation.sh` script.
 
-|Accuracy|0.909|
-|Precision|0.883|
-|Recall|0.940|
+For the Patronus EnterprisePII dataset, we also enabled calculation of annotation accuracy. You should see metrics printed out that are similar to the ones listed below. Since there is randomness in LLM generation, you may not see exactly the same numbers. Randomness is introduced as to allow for re-generation of annotations if the annotation failed in the first round.
 
 
-## How to customize
+| Metric    | Value |
+|-----------|-------|
+| Accuracy  | 0.909 |
+| Precision | 0.883 |
+| Recall    | 0.940 |
+
+
+### How to customize
+1. You can customize the prompt by editing `src/prompt_templates.py`. 
+2. You can implement custom prefilter logic in `src/filters.py`. 
+3. You can adapt our preprocessing code for your own dataset. Our preprocessing code takes a jsonl file as input and output a csv file. You can implement a custom `process_text` function in the `process_enterprise_pii_data.py` according to the specific formatting of your data.
+
+
+## Train the Business Safety classifier
+Once you have obtained the annotated dataset using an LLM, you can train a classifier with the dataset. The classifier consists of two part: 1) an encoder model that converts text into embedding vectors, and 2) a logistic regression model that takes the embedding vectors as input and output prediction labels.
+
+We picked the `nomic-ai/nomic-embed-text-v1` [model](https://blog.nomic.ai/posts/nomic-embed-text-v1) as it is one of the top-performing long-context (max sequence length = 8192 vs. 512 for other BERT-based encoders) encoder models that do well on [Huggingface MTEB Leaderboard](https://huggingface.co/spaces/mteb/leaderboard) as well as long-context [LoCo benchmark](https://hazyresearch.stanford.edu/blog/2024-01-11-m2-bert-retrieval). The long-context capability is useful when the generated content is long (>512 tokens).
+
+You can run the command below to train your classifier.
+    ```shell
+    bash run_logistic_regression.sh
+    ```
+
+After the script is successfully completed, you will get a logistic regression classifier model saved to disk.
+
+## Evaluate the classifier
+You can run the command below to evaluate the classifier trained in the previous step. Note: you can calculate accuracy metrics based on LLM-annotated labels or human-annotated labels. Just specify the column name of the labels that you want to evaluate against in the script by specifying the `LABEL` variable.
+    ```shell
+    bash run_eval.sh
+    ```
+
+For the Patronus EnterprisePII dataset, the metrics on the test set are shown below. Interestingly, the classifier performed perfectly on the 300 test samples when using the gold labels in the original dataset as the reference, while it achieves very good accuracy (around 0.9) when using the LLM annotations as reference.
+
+| |Accuracy|Precision|Recall|
+|--|-------|---------|------|
+|Compared to gold labels|1.0|1.0|1.0|
+|Compared to LLM annotated labels|0.903|0.927|0.886|
+
+

@@ -4,7 +4,6 @@ from utils import get_args
 
 
 def process_text(text):
-    # text = text.split('\'\'\'')[1].strip('\n')
     temp = text.split('Passage: ')[-1]
     temp = temp.split('Choices')[0]
     processed = temp.strip('\n').strip('\'\'\'')
@@ -45,32 +44,19 @@ def main():
     print('max text length: {}, min text length: {}'.format(max(text_length), min(text_length)))
 
     df = pd.DataFrame({
-        'text': text_list,
-        'label': golden_labels,
-        'length': text_length,
+        args.text_col: text_list,
+        args.label_col: golden_labels,
+        args.length_col: text_length,
     })
 
-    # train test split for training and evaluation of classifier
-    df_eval = df.sample(300)
-    df_train = df.drop(df_eval.index)
-
-    df.to_csv(filedir+args.output+'.csv')
-    df.to_json(filedir+args.output+'.jsonl',  orient='records', lines = True)
-
-    df_eval.to_csv(filedir+args.output+'_eval.csv')
-    df_train.to_csv(filedir+args.output+'_train.csv')
-
+    df.to_csv(args.filedir+args.output+'.csv')
+    df.to_json(args.filedir+args.output+'.jsonl',  orient='records', lines = True)
 
     print('unique labels: ', pd.unique(df['label']))
 
     print('Distribution of text length of entire dataset:')
     print(df.describe())
-    print('-'*50)
-    print('Distribution of text length in eval set:')
-    print(df_eval.describe())
-    print('-'*50)
-    print('Distribution of text length in train set:')
-    print(df_train.describe())
+    
 
 
 if __name__=="__main__":

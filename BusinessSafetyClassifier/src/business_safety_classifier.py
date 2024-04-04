@@ -37,8 +37,6 @@ class BusinessSafetyClassifier:
         eval_data, labels = load_data_for_st_encoders(args)
 
         for batch in make_batches(eval_data, args.batch_size):
-            # batch = add_prefix(batch, args.prefix)
-            print(batch)
             embeddings = self.model.encode(batch, convert_to_tensor=True).cpu()
             print('text embedding shape: ', embeddings.shape)
             # prediction
@@ -63,8 +61,10 @@ class BusinessSafetyClassifier:
     def predict(self, args, data):
         # predict function for one single piece of text
         assert self.clf != None, 'No classifier exists, please first train or load one.'
-        embeddings = self.model.encode(data, convert_to_tensor=True).cpu()
+        embeddings = self.model.encode(data, convert_to_tensor=True).reshape(1, -1).cpu()
+        # print('shape of embedding: ', embeddings.shape)
         predictions = self.clf.predict(embeddings)
+        # print('shape of prediction: ', predictions.shape)
         return predictions
         
 

@@ -122,6 +122,22 @@ def get_args():
         "--run_eval", action = "store_true"
     )
 
+    parser.add_argument(
+        "--text_col", type = str, default='text', help="column name for text"
+    )
+
+    parser.add_argument(
+        "--length_col", type = str, default='length', help="name of column that contains length of the text"
+    )
+
+    parser.add_argument(
+        "--label_col", type = str, default='label', help="name of column that contains labels"
+    )
+
+    parser.add_argument(
+        "--eval_size", type=int, default=300
+    )
+
     args = parser.parse_args()
     return args
 
@@ -131,9 +147,9 @@ def add_prefix(text_batch, prefix):
 
 def load_data_for_st_encoders(args):
     df = pd.read_csv(args.filedir+args.filename)
-    text = df['text'].to_list()
+    text = df[args.text_col].to_list()
     text = add_prefix(text, args.prefix)
-    labels = df['label'].to_list()
+    labels = df[args.label_col].to_list()
     return text, labels
 
 def make_batches(text_list, bs):
