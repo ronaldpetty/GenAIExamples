@@ -35,7 +35,7 @@ def get_args():
     )
 
     parser.add_argument(
-        "--max_seq_len", type=int, default=512, help="max sequence length"
+        "--max_seq_len", type=int, default=512, help="max sequence length for embedding model"
     )
 
     parser.add_argument(
@@ -43,24 +43,24 @@ def get_args():
     )
 
     parser.add_argument(
-        "--threshold", type=float, default=0.5
+        "--threshold", type=float, default=0.5, help="threshold for classifier"
     )
 
     parser.add_argument(
         "--lr_clf", type=str, help="path to saved logistic regression classifier"
     )
 
-    parser.add_argument(
-        "--use_m2_bert", action = "store_true"
-    )
+    # parser.add_argument(
+    #     "--use_m2_bert", action = "store_true"
+    # )
 
-    parser.add_argument(
-        "--use_st_encoder", action = "store_true"
-    )
+    # parser.add_argument(
+    #     "--use_st_encoder", action = "store_true"
+    # )
 
-    parser.add_argument(
-        "--use_decoder", action="store_true"
-    )
+    # parser.add_argument(
+    #     "--use_decoder", action="store_true"
+    # )
 
 
     # for logistic regression classifier training
@@ -85,13 +85,13 @@ def get_args():
         "--max_new_tokens", type = int, default=128
     )
 
-    parser.add_argument(
-        "--generate_with_pipeline", action = "store_true"
-    )
+    # parser.add_argument(
+    #     "--generate_with_pipeline", action = "store_true"
+    # )
 
-    parser.add_argument(
-        "--batch_model_generate", action = "store_true"
-    )
+    # parser.add_argument(
+    #     "--batch_model_generate", action = "store_true"
+    # )
 
     parser.add_argument(
         "--vllm_offline", action = "store_true"
@@ -136,6 +136,14 @@ def get_args():
 
     parser.add_argument(
         "--eval_size", type=int, default=300
+    )
+
+    parser.add_argument(
+        "--max_concurrent_requests", type=int, default=256, help="Max number of concurrent requests"
+    )
+
+    parser.add_argument(
+        "--server_address", type=str, default="http://localhost:8080", help="Address of the TGI server"
     )
 
     args = parser.parse_args()

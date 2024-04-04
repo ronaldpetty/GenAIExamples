@@ -6,7 +6,8 @@ import json
 import time
 from utils import get_args
 from utils import calculate_metrics
-from llm_inference import setup_vllm, vllm_batched_offline_generation
+# from llm_inference import setup_vllm, vllm_batched_offline_generation
+from llm_inference import generate_with_tgi
 from prompt_templates import PROMPT_BUSINESS_SENSITIVE, PROMPT_PERSONAL_SENSITIVE
 from filters import run_filters
 
@@ -50,37 +51,53 @@ def main():
     args = get_args()
     print(args)
 
-    df = pd.read_csv(args.filedir+args.filename)
+    # df = pd.read_csv(args.filedir+args.filename)
 
-    # sorting data by text length
-    # this can help improve throughput
-    df = df.sort_values(by=['length'], ascending=False)
+    # # sorting data by text length
+    # # this can help improve throughput
+    # df = df.sort_values(by=['length'], ascending=False)
 
-    text = df['text'].to_list()
+    # text = df['text'].to_list()
 
+    text = [
+        "hello world",
+        "revenue grows by 15 million"
+    ]
+    
+    
     # run custom prefilters
     if args.run_prefilters == True:
         predictions_prefilters = run_filters(text)
         df['prefilter_detected']=predictions_prefilters
 
     # use LLM to annotate data
-    llm = setup_vllm(args)
+    if args.vllm_offline == True:
+        llm = setup_vllm(args)
 
-    t0 = time.time()
+        t0 = time.time()
 
-    # First get business sensitive annotations with LLM
-    predictions_biz, reasons_biz = vllm_batched_offline_generation(args, llm, text, PROMPT_BUSINESS_SENSITIVE) 
+        # First get business sensitive annotations with LLM
+        predictions_biz, reasons_biz = vllm_batched_offline_generation(args, llm, text, PROMPT_BUSINESS_SENSITIVE) 
 
-    t1 = time.time()
-    print('Total time to run text generation for business sensitive: {:.3f} sec'.format(t1-t0))
+        t1 = time.time()
+        print('Total time to run text generation for business sensitive: {:.3f} sec'.format(t1-t0))
 
-    # Then get personal sensitive annotations with LLM
-    predictions_personal, reasons_personal = vllm_batched_offline_generation(args, llm, text, PROMPT_PERSONAL_SENSITIVE)
+        # Then get personal sensitive annotations with LLM
+        predictions_personal, reasons_personal = vllm_batched_offline_generation(args, llm, text, PROMPT_PERSONAL_SENSITIVE)
 
-    t2 = time.time()
-    print('Total time to run text generation for personal sensitive: {:.3f} sec'.format(t2-t1))
-    print('Total time to run text generation: {:.3f} sec'.format(t2-t0))
-    
+        t2 = time.time()
+        print('Total time to run text generation for personal sensitive: {:.3f} sec'.format(t2-t1))
+        print('Total time to run text generation: {:.3f} sec'.format(t2-t0))
+    elif args.tgi_concurrent == True:
+        if args.has_gold_label == True:
+            labels = df[args.label_col]
+        else:
+            labels = None
+        inputs, labels, predictions, reasons = generate_with_tgi(args, text, labels)
+        # need to re-align samples with gold labels
+        # add arg: has_gold_label
+    else:
+        raise ValueError('Currently only vllm_offline mode and tgi_concurrent mode are supported!')
 
     # save results
     df['prediction_biz'] = predictions_biz
@@ -129,7 +146,7 @@ def main():
       
         print('Metrics for final predictions:')
         calculate_metrics(final_predictions, df['label'].to_list())
-
+    
     
     
 

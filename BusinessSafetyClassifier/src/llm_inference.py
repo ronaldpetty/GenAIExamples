@@ -1,4 +1,4 @@
-from vllm import LLM, SamplingParams
+# from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import pipeline
 import torch
@@ -47,7 +47,9 @@ def convert_to_numeric_label(output):
     else:
         return 0
         
-
+##########################################################
+######################### vLLM #############################
+#############################################################
 def setup_vllm(args):  
     # initialize offline engine
     llm = LLM(
@@ -89,6 +91,156 @@ def vllm_batched_offline_generation(args=None, llm=None, text = None, prompt_tem
         reasons.append(out_dict['reason'])
 
     return predictions, reasons
+
+
+#############################################################
+############ TGI on Gaudi ###################################
+#############################################################
+
+def generate_with_tgi(args=None, text = None, labels = None):
+    from huggingface_hub import InferenceClient
+    from concurrent.futures import ThreadPoolExecutor
+    #TGI runs continuous batching: https://github.com/huggingface/text-generation-inference/tree/main/router#simple-continuous-batching
+    #Therefore sending multiple requests concurrently can leverage it.
+
+    ############## Need to debug and uncomment these lines################
+    ####################################################################
+    # make prompts
+    # tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
+    # prompts = []
+    # for txt in text:
+    #     prompts.append(format_prompt(txt, tokenizer, prompt_template))
+
+    prompts = text
+
+    # make samples
+    # {'text': text, 'label': label}
+
+    tgi_client = TgiClient(
+        args.server_address, args.max_concurrent_requests
+    )
+
+    tgi_client.run_generation(
+        prompts, args.max_new_tokens
+    )
+
+    # for input, output in zip(, ):
+    #     print('input: ', input)
+    #     print('output: ', output)
+    #     print('='*50)
+    
+    # parse output
+    predictions = []
+    reasons = []
+    for output in tgi_client._generated_text:
+        out_dict = parse_output(output, args)
+        predictions.append(convert_to_numeric_label(out_dict))
+        reasons.append(out_dict['reason'])
+
+    return tgi_client._input_text, predictions, reasons
+
+
+
+# TGI client code is adapted from: 
+# https://github.com/huggingface/tgi-gaudi/blob/habana-main/examples/tgi_client.py
+import os
+import statistics
+import threading
+import time
+import tqdm
+from typing import List
+
+from huggingface_hub import InferenceClient
+
+
+def except_hook(args):
+    print(f"Thread failed with error: {args.exc_value}")
+    os._exit(1)
+
+threading.excepthook = except_hook
+
+
+class TgiClient:
+    def __init__(
+        self,
+        server_address: str,
+        max_num_threads: int
+    ) -> None:
+        self._lock = threading.Lock()
+        self._semaphore = threading.Semaphore(max_num_threads)
+        self._client = InferenceClient(server_address)
+
+        self._ttft = []
+        self._tpot = []
+        self._generated_text = []
+        self._input_text = []
+
+    def run_generation(
+        self,
+        samples: List[str],
+        max_new_tokens: int
+    ) ->  None:
+        """
+        Run generation for every sample in dataset.
+        Creates a separate thread for every sample.
+        """
+        threads: List[threading.Thread] = []
+        for sample in tqdm.tqdm(samples):
+            self._semaphore.acquire()
+            threads.append(
+                threading.Thread(
+                    target=self._process_sample, args=[sample, max_new_tokens]
+                )
+            )
+            threads[-1].start()
+        for thread in threads:
+            if thread is not None:
+                thread.join()
+
+    def _process_sample(
+        self,
+        sample: str,
+        max_new_tokens: int,
+        # streaming: bool,
+    ) -> str:
+        """
+        Generates response stream for a single sample.
+        Collects performance metrics.
+        """
+        timestamp = time.perf_counter_ns()
+        response = self._client.text_generation(
+            sample, max_new_tokens=max_new_tokens, stream=False, details=True
+        )
+        
+        self._semaphore.release()
+        self._generated_text.append(response.generated_text)
+        self._input_text.append(sample)
+
+    def print_performance_metrics(
+        self,
+        duration_s: float
+    ) -> None:
+        def line():
+            print(32*"-")
+
+        line()
+        print("----- Performance  summary -----")
+        line()
+        print(f"Throughput: {sum(self._generated_tokens) / duration_s:.1f} tokens/s")
+        print(f"Throughput: {len(self._generated_tokens) / duration_s:.1f} queries/s")
+        line()
+        print(f"First token latency:")
+        print(f"\tMedian: \t{statistics.median(self._ttft)*1e-6:.2f}ms")
+        print(f"\tAverage: \t{statistics.fmean(self._ttft)*1e-6:.2f}ms")
+        line()
+        print(f"Output token latency:")
+        print(f"\tMedian: \t{statistics.median(self._tpot)*1e-6:.2f}ms")
+        print(f"\tAverage: \t{statistics.fmean(self._tpot)*1e-6:.2f}ms")
+        line()
+
+
+######################################################################
+
 
 def generate_text(model = None, tokenizer= None, prompt = None, generation_params = None):
     
@@ -180,29 +332,6 @@ def generate_with_pipeline(args = None, text= None, generation_params=None):
         # generated_text_batch = out[0]['generated_text']
         # print(generated_text_batch)
 
-
-def generate_with_tgi(args=None, text = None):
-    from huggingface_hub import InferenceClient
-    from concurrent.futures import ThreadPoolExecutor
-    #TGI runs continuous batching: https://github.com/huggingface/text-generation-inference/tree/main/router#simple-continuous-batching
-    #Therefore sending multiple requests concurrently can leverage it.
-
-    # make prompts
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
-    prompts = []
-    for txt in text:
-        prompts.append(format_prompt(txt, tokenizer))
-
-
-    client = InferenceClient(model="http://127.0.0.1:8080")
-
-    def gen_text(text):
-        return client.text_generation(text,max_new_tokens=256)
-
-    with ThreadPoolExecutor(max_workers=args.batch_size) as executor: 
-        out = list(executor.map(gen_text, prompts))
-
-    print(out)
 
 
 def run_llm_inference_alternatives(args, text, prompt_template):
