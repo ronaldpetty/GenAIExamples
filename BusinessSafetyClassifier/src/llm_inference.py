@@ -3,6 +3,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import pipeline
 import torch
 import json
+from utils import CustomDataset
+from torch.utils.data import DataLoader
 
 
 def format_prompt(text, tokenizer, prompt_template):
@@ -240,7 +242,172 @@ class TgiClient:
 
 
 ######################################################################
+########### model.generate with optimum-habana ###################
+#####################################################################
+# Ref: https://github.com/huggingface/optimum-habana/blob/main/examples/text-generation/utils.py
+def setup_env(args):
+    import shutil
+    import os
+    # # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
+    # check_min_version("4.34.0")
+    # check_optimum_habana_min_version("1.9.0.dev0")
+    # # TODO: SW-167588 - WA for memory issue in hqt prep_model
+    # os.environ.setdefault("EXPERIMENTAL_WEIGHT_SHARING", "FALSE")
 
+    # if args.global_rank == 0 and not args.torch_compile:
+    os.environ.setdefault("GRAPH_VISUALIZATION", "true")
+    shutil.rmtree(".graph_dumps", ignore_errors=True)
+
+    # if args.world_size > 0:
+    #     os.environ.setdefault("PT_HPU_LAZY_ACC_PAR_MODE", "0")
+    #     os.environ.setdefault("PT_HPU_ENABLE_LAZY_COLLECTIVES", "true")
+
+    # Tweak generation so that it runs faster on Gaudi
+    from optimum.habana.transformers.modeling_utils import adapt_transformers_to_gaudi
+    adapt_transformers_to_gaudi()
+
+
+def setup_device(args):
+    if args.device == "hpu":
+        import habana_frameworks.torch.core as htcore
+    return torch.device(args.device)
+
+def setup_generation_config(args, model):
+    import copy
+    # bad_words_ids = None
+    # force_words_ids = None
+    # if args.bad_words is not None:
+    #     bad_words_ids = [tokenizer.encode(bad_word, add_special_tokens=False) for bad_word in args.bad_words]
+    # if args.force_words is not None:
+    #     force_words_ids = [tokenizer.encode(force_word, add_special_tokens=False) for force_word in args.force_words]
+
+    # is_optimized = model_is_optimized(model.config)
+    # Generation configuration
+    generation_config = copy.deepcopy(model.generation_config)
+    generation_config.max_new_tokens = args.max_new_tokens
+    generation_config.use_cache = args.use_kv_cache
+    # generation_config.static_shapes = is_optimized # is_optimized not defined
+    # generation_config.bucket_size = args.bucket_size if is_optimized else -1
+    generation_config.bucket_size = -1 # not using the bucket size optimization
+    generation_config.bucket_internal = args.bucket_internal
+    generation_config.do_sample = args.do_sample
+    generation_config.num_beams = args.num_beams
+    # generation_config.bad_words_ids = bad_words_ids
+    # generation_config.force_words_ids = force_words_ids
+    generation_config.num_return_sequences = 1 #args.num_return_sequences # only generate 1 seq
+    generation_config.trim_logits = args.trim_logits
+    generation_config.attn_softmax_bf16 = args.attn_softmax_bf16
+    # generation_config.limit_hpu_graphs = args.limit_hpu_graphs # we do want to use graph mode
+    generation_config.reuse_cache = args.reuse_cache
+    # generation_config.reduce_recompile = args.reduce_recompile # not using reduce_recompile optimization
+    # if generation_config.reduce_recompile:
+    #     assert generation_config.bucket_size > 0
+    generation_config.use_flash_attention = args.use_flash_attention
+    generation_config.flash_attention_recompute = args.flash_attention_recompute
+    generation_config.flash_attention_causal_mask = args.flash_attention_causal_mask
+    return generation_config
+
+
+
+def setup_model_optimum_habana(args):
+    setup_env(args)
+    setup_device(args)
+
+   
+    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16)
+
+    if args.use_hpu_graphs:
+        from habana_frameworks.torch.hpu import wrap_in_hpu_graph
+        model = wrap_in_hpu_graph(model)
+
+    model = model.eval().to(args.device)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        model.generation_config.pad_token_id = model.generation_config.eos_token_id
+
+    generation_config = setup_generation_config(args, model)
+
+    return model, tokenizer, generation_config
+
+
+def batch_generate_gaudi(args, text, tokenizer, model, generation_config, prompt_template):
+    input_dataset = CustomDataset(text, tokenizer,prompt_template)
+    input_dataloader = DataLoader(input_dataset, batch_size=args.batch_size)
+
+    predictions = []
+    reasons = []
+
+    for batch in input_dataloader:
+        input_tokens = tokenizer.batch_encode_plus(batch, return_tensors="pt", padding=True) # padding has to be true otherwise error
+
+        # send data to hpu device
+        for t in input_tokens:
+            if torch.is_tensor(input_tokens[t]):
+                input_tokens[t] = input_tokens[t].to(args.device)
+        
+        outputs = model.generate(
+                    **input_tokens,
+                    generation_config=generation_config,
+                    lazy_mode=args.gaudi_lazy_mode,
+                    hpu_graphs=args.use_hpu_graphs,
+                    # profiling_steps=args.profiling_steps,
+                    # profiling_warmup_steps=args.profiling_warmup_steps,
+                ).cpu()
+        
+        decoded_outputs = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+        for i in range(args.batch_size):
+            decoded_txt = decoded_outputs[i]
+            out_dict = parse_output(decoded_txt)
+            predictions.append(convert_to_numeric_label(out_dict))
+            reasons.append(out_dict['reason'])
+            print(predictions)
+
+        # print(decoded_outputs)
+        # print("="*50)
+    return predictions, reasons
+
+def single_generate_gaudi(args, text, tokenizer, model, generation_config, prompt_template):
+    chat = [
+            {"role": "user",
+            "content":prompt_template.format(text=text)}
+        ]
+    prompt = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+    input_tokens = tokenizer.encode_plus(prompt, return_tensors="pt")
+    for t in input_tokens:
+        if torch.is_tensor(input_tokens[t]):
+            input_tokens[t] = input_tokens[t].to(args.device)
+    
+    outputs = model.generate(
+                    **input_tokens,
+                    generation_config=generation_config,
+                    lazy_mode=args.gaudi_lazy_mode,
+                    hpu_graphs=args.use_hpu_graphs,
+                    # profiling_steps=args.profiling_steps,
+                    # profiling_warmup_steps=args.profiling_warmup_steps,
+                ).cpu()
+        
+    decoded_outputs = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    print(decoded_outputs)
+
+
+def generate_with_optimum_habana(args = None, text= None, prompt_template=None):
+    import habana_frameworks.torch.hpu as torch_hpu
+    model, tokenizer, generation_config = setup_model_optimum_habana(args)
+    
+    if args.batch_size > 1:
+        batch_generate_gaudi(args, text, tokenizer, model, generation_config, prompt_template)
+    else:
+        for txt in text:
+            single_generate_gaudi(args, txt, tokenizer, model, generation_config, prompt_template)
+            print('='*50)
+    
+    
+
+
+#######################################################################
 
 def generate_text(model = None, tokenizer= None, prompt = None, generation_params = None):
     

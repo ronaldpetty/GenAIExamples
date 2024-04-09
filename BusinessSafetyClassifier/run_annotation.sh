@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # eval dataset
-FILEDIR=/mnt/disk3/minminhou/datasets/patronus_enterprise_pii/
+FILEDIR=/home/user/workspace/datasets/patronus_enterprise_pii/ #/mnt/disk3/minminhou/datasets/patronus_enterprise_pii/
 FILENAME=processed_patronus_enterprise_pii.csv
 OUTPUT=annotated_patronus_enterprise_pii
 
@@ -13,6 +13,9 @@ MAXNEWTOKEN=256
 
 # tensor parallel for vllm
 TP=4
+
+# Args for optimum habana
+BATCHSIZE=16
 
 # train test split
 TESTSIZE=300
@@ -26,10 +29,18 @@ python src/annotate_data_with_llm.py \
 --max_new_tokens $MAXNEWTOKEN \
 --tp_size $TP \
 --eval_size $TESTSIZE \
---run_prefilters \
---vllm_offline \
+--batch_size $BATCHSIZE \
 --rerun_failed \
---run_eval
+--run_eval \
+--optimum_habana \
+--use_kv_cache \
+--gaudi_lazy_mode \
+
+
+#--run_prefilters \
+#--vllm_offline \
+# --do_sample \
+# --use_hpu_graphs \
 
 
 

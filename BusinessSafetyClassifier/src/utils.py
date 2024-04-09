@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
+from prompt_templates import PROMPT_BUSINESS_SENSITIVE
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -102,7 +103,12 @@ def get_args():
     )
 
     parser.add_argument(
-        "--device", type = str, default='cuda', help="options: cuda, cpu"
+        "--optimum_habana", action = "store_true"
+    )
+
+
+    parser.add_argument(
+        "--device", type = str, default='hpu', help="options: hpu, cuda, cpu"
     )
 
     parser.add_argument(
@@ -144,6 +150,78 @@ def get_args():
 
     parser.add_argument(
         "--server_address", type=str, default="http://localhost:8080", help="Address of the TGI server"
+    )
+
+    # args for text generation with optimum habana
+    parser.add_argument(
+        "--use_kv_cache",
+        action="store_true",
+        help="Whether to use the key/value cache for decoding. It should speed up generation.",
+    )
+    parser.add_argument(
+        "--use_hpu_graphs",
+        action="store_true",
+        help="Whether to use HPU graphs or not. Using HPU graphs should give better latencies.",
+    )
+    parser.add_argument(
+        "--do_sample",
+        action="store_true",
+        help="Whether to use sampling for generation.",
+    )
+    parser.add_argument(
+        "--num_beams",
+        default=1,
+        type=int,
+        help="Number of beams used for beam search generation. 1 means greedy search will be performed.",
+    )
+    parser.add_argument(
+        "--trim_logits",
+        action="store_true",
+        help="Calculate logits only for the last token to save memory in the first step.",
+    )
+    parser.add_argument(
+        "--bucket_size",
+        default=-1,
+        type=int,
+        help="Bucket size to maintain static shapes. If this number is negative (default is -1) \
+            then we use `shape = prompt_length + max_new_tokens`. If a positive number is passed \
+            we increase the bucket in steps of `bucket_size` instead of allocating to max (`prompt_length + max_new_tokens`).",
+    )
+    parser.add_argument(
+        "--bucket_internal",
+        action="store_true",
+        help="Split kv sequence into buckets in decode phase. It improves throughput when max_new_tokens is large.",
+    )
+    parser.add_argument(
+        "--reuse_cache",
+        action="store_true",
+        help="Whether to reuse key/value cache for decoding. It should save memory.",
+    )
+    parser.add_argument(
+        "--use_flash_attention",
+        action="store_true",
+        help="Whether to enable Habana Flash Attention, provided that the model supports it.",
+    )
+    parser.add_argument(
+        "--flash_attention_recompute",
+        action="store_true",
+        help="Whether to enable Habana Flash Attention in recompute mode on first token generation. This gives an opportunity of splitting graph internally which helps reduce memory consumption.",
+    )
+    parser.add_argument(
+        "--flash_attention_causal_mask",
+        action="store_true",
+        help="Whether to enable Habana Flash Attention in causal mode on first token generation.",
+    )
+    parser.add_argument(
+        "--attn_softmax_bf16",
+        action="store_true",
+        help="Whether to run attention softmax layer in lower precision provided that the model supports it and "
+        "is also running in lower precision.",
+    )
+    parser.add_argument(
+        "--gaudi_lazy_mode",
+        action="store_true",
+        help="Whether to use lazy mode, should improve performance.",
     )
 
     args = parser.parse_args()
@@ -198,9 +276,10 @@ def calculate_metrics(predictions, labels):
 
 
 class CustomDataset(Dataset):
-    def __init__(self, data, tokenizer):
+    def __init__(self, data, tokenizer, prompt_template):
         self.data = data
         self.tokenizer = tokenizer
+        self.prompt_template = prompt_template
 
     def __len__(self):
         return len(self.data)
@@ -209,7 +288,7 @@ class CustomDataset(Dataset):
         # output = pipe(prompt)[0]['generated_text'][-1]
         chat = [
             {"role": "user",
-            "content":PROMPT.format(text=self.data[i])}
+            "content":self.prompt_template.format(text=self.data[i])}
         ]
         prompt = self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
         return prompt

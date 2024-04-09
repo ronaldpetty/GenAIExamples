@@ -7,7 +7,8 @@ import time
 from utils import get_args
 from utils import calculate_metrics
 # from llm_inference import setup_vllm, vllm_batched_offline_generation
-from llm_inference import generate_with_tgi
+from llm_inference import generate_with_tgi, generate_with_optimum_habana
+
 from prompt_templates import PROMPT_BUSINESS_SENSITIVE, PROMPT_PERSONAL_SENSITIVE
 from filters import run_filters
 
@@ -51,18 +52,20 @@ def main():
     args = get_args()
     print(args)
 
-    # df = pd.read_csv(args.filedir+args.filename)
+    df = pd.read_csv(args.filedir+args.filename)
 
-    # # sorting data by text length
-    # # this can help improve throughput
-    # df = df.sort_values(by=['length'], ascending=False)
+    # sorting data by text length
+    # this can help improve throughput
+    df = df.sort_values(by=['length'], ascending=False)
+    df = df.head(128)
+    text = df['text'].to_list()
 
-    # text = df['text'].to_list()
-
-    text = [
-        "hello world",
-        "revenue grows by 15 million"
-    ]
+    # text = [
+    #     "hello world",
+    #     "revenue grows by 15 million",
+    #     "good performance in Q2",
+    #     "user base expanded in North America",
+    # ]
     
     
     # run custom prefilters
@@ -93,9 +96,16 @@ def main():
             labels = df[args.label_col]
         else:
             labels = None
-        inputs, labels, predictions, reasons = generate_with_tgi(args, text, labels)
+        # TODO ####################
         # need to re-align samples with gold labels
         # add arg: has_gold_label
+        inputs, labels, predictions, reasons = generate_with_tgi(args, text, labels)
+        
+    elif args.optimum_habana == True:
+        t0 = time.time()
+        generate_with_optimum_habana(args, text, PROMPT_BUSINESS_SENSITIVE)
+        t1 = time.time()
+        print('time to run {} samples (bs = {}): {:.3f} sec'.format(len(text), args.batch_size, t1-t0))
     else:
         raise ValueError('Currently only vllm_offline mode and tgi_concurrent mode are supported!')
 

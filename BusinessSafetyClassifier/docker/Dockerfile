@@ -4,7 +4,7 @@ WORKDIR /home/user
 COPY requirements.txt /home/user/
 RUN pip install -r requirements.txt
 # RUN pip install git+https://github.com/HabanaAI/DeepSpeed.git@1.13.0
-# RUN pip install --upgrade-strategy eager optimum[habana]
+RUN pip install --upgrade-strategy eager optimum[habana]
 # # enable password-less ssh
 # RUN ssh-keygen -t rsa -f /root/.ssh/id_rsa -P '' && \
 #     cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
