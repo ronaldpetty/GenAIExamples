@@ -7,7 +7,7 @@ import time
 from utils import get_args
 from utils import calculate_metrics
 # from llm_inference import setup_vllm, vllm_batched_offline_generation
-from llm_inference import generate_with_tgi, generate_with_optimum_habana
+from llm_inference import generate_with_tgi, batch_generate_gaudi, setup_model_optimum_habana
 
 from prompt_templates import PROMPT_BUSINESS_SENSITIVE, PROMPT_PERSONAL_SENSITIVE
 from filters import run_filters
@@ -20,7 +20,13 @@ def rerun_failed_queries(df, label_col, reason_col, args, llm, prompt_template):
     if df_fail.shape[0]>0:
         print('Rerun {} queries....'.format(df_fail.shape[0]))
         text = df_fail['text'].to_list()
-        predictions, reasons = vllm_batched_offline_generation(args, llm, text, prompt_template)
+        if args.vllm_offline:
+            predictions, reasons = vllm_batched_offline_generation(args, llm, text, prompt_template)
+        elif args.optimum_habana:
+            tokenizer, model, generation_config = llm
+            predictions, reasons = batch_generate_gaudi(args, text, tokenizer, model, generation_config, prompt_template)
+        else:
+            raise ValueError('only support vllm and optimum_habana for now')
         # compare the new run results vs the previous run results
         count_fails_new = reasons.count('FAIL')
         if count_fails_new < df_fail.shape[0]:
@@ -57,7 +63,8 @@ def main():
     # sorting data by text length
     # this can help improve throughput
     df = df.sort_values(by=['length'], ascending=False)
-    df = df.head(128)
+    # df = df.head(32)
+    # df = df.sample(4)
     text = df['text'].to_list()
 
     # text = [
@@ -66,7 +73,6 @@ def main():
     #     "good performance in Q2",
     #     "user base expanded in North America",
     # ]
-    
     
     # run custom prefilters
     if args.run_prefilters == True:
@@ -78,19 +84,17 @@ def main():
         llm = setup_vllm(args)
 
         t0 = time.time()
-
         # First get business sensitive annotations with LLM
-        predictions_biz, reasons_biz = vllm_batched_offline_generation(args, llm, text, PROMPT_BUSINESS_SENSITIVE) 
-
+        predictions_biz, reasons_biz = vllm_batched_offline_generation(args, llm, text, PROMPT_BUSINESS_SENSITIVE)
         t1 = time.time()
         print('Total time to run text generation for business sensitive: {:.3f} sec'.format(t1-t0))
 
         # Then get personal sensitive annotations with LLM
         predictions_personal, reasons_personal = vllm_batched_offline_generation(args, llm, text, PROMPT_PERSONAL_SENSITIVE)
-
         t2 = time.time()
         print('Total time to run text generation for personal sensitive: {:.3f} sec'.format(t2-t1))
         print('Total time to run text generation: {:.3f} sec'.format(t2-t0))
+
     elif args.tgi_concurrent == True:
         if args.has_gold_label == True:
             labels = df[args.label_col]
@@ -102,12 +106,16 @@ def main():
         inputs, labels, predictions, reasons = generate_with_tgi(args, text, labels)
         
     elif args.optimum_habana == True:
+        model, tokenizer, generation_config = setup_model_optimum_habana(args)
         t0 = time.time()
-        generate_with_optimum_habana(args, text, PROMPT_BUSINESS_SENSITIVE)
+        predictions_biz, reasons_biz = batch_generate_gaudi(args, text, tokenizer, model, generation_config, PROMPT_BUSINESS_SENSITIVE)
         t1 = time.time()
         print('time to run {} samples (bs = {}): {:.3f} sec'.format(len(text), args.batch_size, t1-t0))
+        predictions_personal, reasons_personal = batch_generate_gaudi(args, text, tokenizer, model, generation_config, PROMPT_PERSONAL_SENSITIVE)
+        t2 = time.time()
+        print('time to run {} samples (bs = {}): {:.3f} sec'.format(len(text), args.batch_size, t2-t1))
     else:
-        raise ValueError('Currently only vllm_offline mode and tgi_concurrent mode are supported!')
+        raise ValueError('Currently only vllm_offline, tgi_concurrent and optimum_habana are supported!')
 
     # save results
     df['prediction_biz'] = predictions_biz
@@ -119,11 +127,13 @@ def main():
 
     # rerun data points that failed output parsing
     if args.rerun_failed == True:
+        if args.optimum_habana:
+            llm = (tokenizer, model, generation_config)
+
         df = rerun_failed_queries(df, 'prediction_biz', 'reason_biz', args, llm, PROMPT_BUSINESS_SENSITIVE)
-        df = rerun_failed_queries(df, 'prediction_personal', 'reason_personal', args, llm, PROMPT_PERSONAL_SENSITIVE)
+        df = rerun_failed_queries(df, 'prediction_personal', 'reason_personal', args, llm, PROMPT_PERSONAL_SENSITIVE)        
         # save again
         df.to_csv(args.filedir+args.output+'.csv')
-
     
     # get final predictions by combining 
     # business_sensitive, personal_sensitive
@@ -156,7 +166,6 @@ def main():
       
         print('Metrics for final predictions:')
         calculate_metrics(final_predictions, df['label'].to_list())
-    
     
     
 

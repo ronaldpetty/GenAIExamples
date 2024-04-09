@@ -31,6 +31,9 @@ def parse_output(output, args = None):
     try:
         if args.vllm_offline == False:
             output = output.split('[/INST]')[-1].strip(" ").strip("</s>")
+        if args.optimum_habana == True:
+            output = output.split('}')[0].strip()
+            output = output+'}'
         output_dict = json.loads(output)
         # print(output_dict)
     except Exception as e:
@@ -333,15 +336,16 @@ def setup_model_optimum_habana(args):
 
 
 def batch_generate_gaudi(args, text, tokenizer, model, generation_config, prompt_template):
+    import habana_frameworks.torch.hpu as torch_hpu
     input_dataset = CustomDataset(text, tokenizer,prompt_template)
     input_dataloader = DataLoader(input_dataset, batch_size=args.batch_size)
 
     predictions = []
     reasons = []
 
-    for batch in input_dataloader:
+    for batch in tqdm.tqdm(input_dataloader):
         input_tokens = tokenizer.batch_encode_plus(batch, return_tensors="pt", padding=True) # padding has to be true otherwise error
-
+        # input_shape = input_tokens.input_ids.shape[1]
         # send data to hpu device
         for t in input_tokens:
             if torch.is_tensor(input_tokens[t]):
@@ -355,15 +359,18 @@ def batch_generate_gaudi(args, text, tokenizer, model, generation_config, prompt
                     # profiling_steps=args.profiling_steps,
                     # profiling_warmup_steps=args.profiling_warmup_steps,
                 ).cpu()
+        # print('Generated tokens number: ', outputs.shape[1]-input_shape)
         
         decoded_outputs = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-        for i in range(args.batch_size):
+        for i in range(len(decoded_outputs)):
             decoded_txt = decoded_outputs[i]
-            out_dict = parse_output(decoded_txt)
+            # print('decoded text: ', decoded_txt)
+            out_dict = parse_output(decoded_txt, args)
+            # print(out_dict)
             predictions.append(convert_to_numeric_label(out_dict))
             reasons.append(out_dict['reason'])
-            print(predictions)
+            # print(predictions)
 
         # print(decoded_outputs)
         # print("="*50)
@@ -391,20 +398,6 @@ def single_generate_gaudi(args, text, tokenizer, model, generation_config, promp
         
     decoded_outputs = tokenizer.decode(outputs[0], skip_special_tokens=True)
     print(decoded_outputs)
-
-
-def generate_with_optimum_habana(args = None, text= None, prompt_template=None):
-    import habana_frameworks.torch.hpu as torch_hpu
-    model, tokenizer, generation_config = setup_model_optimum_habana(args)
-    
-    if args.batch_size > 1:
-        batch_generate_gaudi(args, text, tokenizer, model, generation_config, prompt_template)
-    else:
-        for txt in text:
-            single_generate_gaudi(args, txt, tokenizer, model, generation_config, prompt_template)
-            print('='*50)
-    
-    
 
 
 #######################################################################
@@ -439,7 +432,7 @@ def sequential_generate_with_model_generate(args=None, generation_params=None, t
 
         output = generate_text(model, tokenizer, chat, generation_params)
 
-        output = parse_output(output)
+        output = parse_output(output, args)
 
         predictions.append(convert_to_numeric_label(output))
         reasons.append(output['reason'])
@@ -470,9 +463,9 @@ def batch_generation_with_model_generate(args=None, generation_params=None, text
             generated_txts = tokenizer.batch_decode(outputs)
             # print(generated_txts)
 
-        for i in range(args.batch_size):
+        for i in range(len(generated_txts)):
             txt = generated_txts[i]
-            out_dict = parse_output(txt)
+            out_dict = parse_output(txt, args)
             predictions.append(convert_to_numeric_label(out_dict))
             reasons.append(out_dict['reason'])
     

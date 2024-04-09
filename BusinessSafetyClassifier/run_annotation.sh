@@ -30,16 +30,17 @@ python src/annotate_data_with_llm.py \
 --tp_size $TP \
 --eval_size $TESTSIZE \
 --batch_size $BATCHSIZE \
+--run_prefilters \
 --rerun_failed \
 --run_eval \
 --optimum_habana \
 --use_kv_cache \
 --gaudi_lazy_mode \
+--do_sample \
 
 
-#--run_prefilters \
+
 #--vllm_offline \
-# --do_sample \
 # --use_hpu_graphs \
 
 
