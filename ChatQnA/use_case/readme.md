@@ -7,7 +7,7 @@ The workflow uses the GitHub API to fetch the issue details and the ChatQnA API 
 
 ## Workflow
 
-![](./auto-reply.png =100x20)
+<img src="auto-reply.png" width = "70%" />
 
 ## Issue Template 
 During the workflow study, we found not all issues can get a reasonable answer form the ChatQnA knowledge base. If we auto-rely for all the issues some answers may not be helpful a
