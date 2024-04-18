@@ -6,7 +6,7 @@ import logging
 import pandas as pd
 
 TOKEN = os.getenv("TOKEN")
-NEURALCHAT_SERVER = os.getenv("NEURALCHAT_SERVER")
+CHATBOT_SERVER = os.getenv("CHATBOT_SERVER")
 GITHUB_WORKSPACE = os.getenv("GITHUB_WORKSPACE")
 
 parser = argparse.ArgumentParser()
@@ -17,7 +17,7 @@ args = parser.parse_args()
 
 issue_number = os.getenv("NUMBER")
 comment_id = os.getenv("COMMEND_ID")
-developers = os.getenv("maintain_list")
+developers = os.getenv("MAINTAINER")
 developers_list = developers.split(",")
 os.environ["no_proxy"] = "intel.com,.intel.com,localhost,127.0.0.1"
 os.environ["NO_PROXY"] = "intel.com,.intel.com,localhost,127.0.0.1"
@@ -104,7 +104,7 @@ def filter_comment(user_content: str):
     return user_content
 
 def request_neuralchat_bot(user_content: str, url_post: str):
-    url = 'http://%s:8000/v1/chat/%s' % (NEURALCHAT_SERVER, url_post)
+    url = 'http://%s:8000/v1/chat/%s' % (CHATBOT_SERVER, url_post)
     headers = {'Content-Type': 'application/json'}
     messages = [{"role": "system", "content": "You are a code assistant. Please answer the user's issue accurately. If you cannot answer, please explain politely."}, 
                 {"role": "user", "content": user_content}]
@@ -138,7 +138,7 @@ def request_neuralchat_bot(user_content: str, url_post: str):
 
 
 def request_neuralchat_bot_with_history(messages: list, url_post: str):
-    url = 'http://%s:8000/v1/chat/%s' % (NEURALCHAT_SERVER, url_post)
+    url = 'http://%s:8000/v1/chat/%s' % (CHATBOT_SERVER, url_post)
     headers = {'Content-Type': 'application/json'}
     data = {"model": "deepseek-ai/deepseek-coder-6.7b-instruct",
             "messages": messages
