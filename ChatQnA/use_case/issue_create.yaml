@@ -1,0 +1,26 @@
+name: Issue Create Auto Reply
+on:
+    issues:
+      types: [opened, reopened]
+
+jobs:
+  issue_created:
+    # This job only runs for issue comments
+    name: Issue Create
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: issues-node
+    steps:
+      - name: Checkout out Repo
+        uses: actions/checkout@v3
+
+      - name: Reply when Issue Created
+        run: |
+          echo "Issue $NUMBER Created, Request NeuralChatBot for ${{ github.event.issue.user.login }}"
+          python ${{ github.workspace }}/.github/workflows/ask_neuralchatbot.py --stage "create"
+
+        env:
+          NUMBER: ${{ github.event.issue.number }}
+          TOKEN: ${{ vars.TOKEN }}
+          no_proxy: "intel.com,.intel.com,localhost,127.0.0.1"
+          NEURALCHAT_SERVER: ${{ vars.NEURALCHAT_SERVER }}
+          maintain_list: ${{ vars.developer_list }}
